@@ -108,6 +108,8 @@ sudo xattr -cr /Applications/SkillDock.app
 
 正式发布的 Intel 安装包仍需在 `release.yml` 的矩阵中增加 `macos-15-intel` / `x86_64-apple-darwin`，并复用同一套 Apple 签名、公证和 updater Secrets。
 
+Intel Mac 构建过程中遇到的 runner 选择、产物命名、secrets 缺失、workflow 变量未定义、签名公证与 macOS 12 兼容性等问题，见 [`release/intel-mac.md`](./intel-mac.md)。
+
 ## GitHub Actions Secrets
 
 在以下页面配置：

@@ -177,6 +177,8 @@ SkillDock 适合作为企业统一的 Skill 管理平台，对接公司内部商
 | macOS Intel (x86_64) | 已发布 |
 | Windows x64 | 已发布 |
 
+Intel Mac 上 macOS 12 因缺少 `color-mix()`（需 Safari 16.2）会出现颜色降级，详见 [Intel Mac 说明](docs/release/intel-mac.md)。
+
 ### 未公证应用放行
 
 SkillDock 目前未经过 Apple 公证，macOS 可能会阻止打开。安装后在终端执行：

@@ -176,6 +176,8 @@ Download the latest [SkillDock release](https://github.com/wanghuan9/skilldock/r
 | macOS Intel (x86_64) | Released |
 | Windows x64 | Released |
 
+On Intel Macs, macOS 12 renders the app with degraded colors because `color-mix()` needs Safari 16.2. See [Intel Mac notes](docs/release/intel-mac.md).
+
 ### Open the Unnotarized App
 
 SkillDock is not currently notarized by Apple, so macOS may prevent it from opening. After installation, run:
