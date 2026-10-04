@@ -47,7 +47,7 @@ npm run release:publish
 4. 根据公开 Git 历史生成发布日志，并等待人工确认。
 5. 创建草稿 Release，上传 macOS 安装包、updater artifacts、签名和 `latest.json`。
 6. 所有本地资产上传完成后发布 Release，并让版本 tag 精确指向本次构建的公开提交。
-7. Release 发布事件触发公开仓库的 `release.yml`，自动补齐 macOS Intel 与 Windows x64 安装包，并重建包含全部平台的 `latest.json`。
+7. Release 发布事件触发公开仓库的 `release.yml`，自动补齐 Windows x64 安装包，并重建包含全部平台的 `latest.json`。
 
 默认 updater 私钥路径：
 
@@ -66,6 +66,8 @@ Apple 公证账号优先读取环境变量 `APPLE_ID`。未设置时，脚本会
 
 ## GitHub Actions 发布或补发
 
+`release.yml` 的两个 job 都带 `if: github.repository == 'wanghuan9/skilldock'` 守卫：fork 仓库上触发时 job 直接跳过，不会消耗 runner，也不会因为缺少 secrets 报错。该工作流依赖下列仓库 secrets（fork 不会获得这些 secrets），并且只读写 `wanghuan9/skilldock` 的 Release，因此 fork 仓库上不要手动触发它，改用下文的「macOS Intel 构建」。
+
 公开仓库的 `.github/workflows/release.yml` 支持手动执行：
 
 ```bash
@@ -80,15 +82,23 @@ gh workflow run release.yml \
 
 如果 Release 已存在，工作流只构建缺失的平台资产；已有平台不会重复构建。补传时会保留现有 Release 正文和 `latest.json` 中的历史发布说明。
 
-`release.yml` 的构建矩阵包含三个 target：
+`release.yml` 的构建矩阵包含两个 target：
 
 - `aarch64-apple-darwin`（`macos-latest`，Apple Silicon）
-- `x86_64-apple-darwin`（`macos-15-intel`，Intel）
 - `x86_64-pc-windows-msvc`（`windows-latest`）
 
 每个 target 在独立 job 中构建，`tauri-action` 只能写入自己构建的平台，因此 `release.yml` 在所有构建 job 之后运行 `updater-metadata` job：它下载 Release 上全部 `.sig` 资产，用 `scripts/updater-metadata.cjs` 保留已有平台条目、补齐缺失平台，并覆盖上传最终的 `latest.json`。缺少这一步时，最后完成的构建 job 会覆盖其他平台的条目，导致部分架构无法自动更新。
 
-macOS Intel 与 Apple Silicon 共用同一套 Apple 证书、公证账号和 updater 私钥，Secrets 无需额外配置。
+## macOS Intel 构建
+
+`.github/workflows/macos-intel-build.yml` 在每次 push 和手动触发时，于 `macos-15-intel` runner 上构建 `x86_64-apple-darwin` 的 `app` 与 `dmg`，并把 `bundle/` 作为 workflow artifact（保留 14 天）上传。该 action：
+
+- 不创建或修改任何 GitHub Release，因此不依赖 Apple 证书、公证账号和 updater 私钥；
+- 用 ad-hoc 签名（`signingIdentity: "-"`）覆盖 `tauri.conf.json` 中的 Developer ID，使产物可在 Intel Mac 上直接安装；
+- 关闭 updater artifacts，因为没有对应 Release；
+- 校验 `package.json`、`tauri.conf.json`、`Cargo.toml` 三处版本一致，并用 `lipo` 确认产物架构确为 `x86_64`。
+
+正式发布的 Intel 安装包仍需在 `release.yml` 的矩阵中增加 `macos-15-intel` / `x86_64-apple-darwin`，并复用同一套 Apple 签名、公证和 updater Secrets。
 
 ## GitHub Actions Secrets
 

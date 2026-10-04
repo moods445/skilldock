@@ -1,0 +1,137 @@
+name: macOS Intel Build
+
+# Intel-only packaging pipeline. It never touches a GitHub Release: the signed
+# and notarized Intel installer is still produced by release.yml. This workflow
+# only guarantees that every push still builds for x86_64 macOS and keeps the
+# bundle as a workflow artifact for quick manual testing.
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: macos-intel-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TARGET: x86_64-apple-darwin
+  # Keep the release profile identical to release.yml so Intel artifacts stay
+  # comparable with the officially published ones.
+  CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "64"
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_STRIP: "symbols"
+
+jobs:
+  build:
+    name: Build x86_64 macOS bundle
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+
+      - uses: Swatinem/rust-cache@v2.9.1
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: intel-${{ env.TARGET }}
+          cache-workspace-crates: true
+          cache-on-failure: true
+
+      - run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Resolve build metadata
+        id: build_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version="$(node -p 'require("./package.json").version')"
+          tauri_version="$(node -p 'require("./src-tauri/tauri.conf.json").version')"
+          cargo_version="$(awk -F' = ' '/^version = / { gsub(/"/, "", $2); print $2; exit }' src-tauri/Cargo.toml)"
+
+          if [[ "$package_version" != "$tauri_version" ]]; then
+            printf 'package.json (%s) and tauri.conf.json (%s) versions differ\n' \
+              "$package_version" "$tauri_version" >&2
+            exit 1
+          fi
+          if [[ "$package_version" != "$cargo_version" ]]; then
+            printf 'package.json (%s) and Cargo.toml (%s) versions differ\n' \
+              "$package_version" "$cargo_version" >&2
+            exit 1
+          fi
+
+          echo "version=$package_version" >> "$GITHUB_OUTPUT"
+          echo "ref_name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Intel app and DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ad-hoc signing keeps the bundle runnable on Intel Macs. Updater
+          # artifacts stay off because this workflow publishes no Release, and
+          # the Developer ID identity from tauri.conf.json is not available here.
+          npm run desktop:build -- \
+            --target "$TARGET" \
+            --bundles app,dmg \
+            --config '{"bundle":{"createUpdaterArtifacts":false,"macOS":{"signingIdentity":"-"}}}'
+
+      - name: Verify bundle
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="src-tauri/target/$TARGET/release/bundle"
+          app_path="$bundle_dir/macos/SkillDock.app"
+          binary_path="$app_path/Contents/MacOS/SkillDock"
+
+          [[ -d "$app_path" ]] || { printf 'missing app bundle: %s\n' "$app_path" >&2; exit 1; }
+          [[ -f "$binary_path" ]] || { printf 'missing app binary: %s\n' "$binary_path" >&2; exit 1; }
+
+          dmg_count="$(find "$bundle_dir/dmg" -maxdepth 1 -name '*.dmg' | wc -l | tr -d ' ')"
+          if [[ "$dmg_count" != "1" ]]; then
+            printf 'expected exactly one dmg, found %s\n' "$dmg_count" >&2
+            exit 1
+          fi
+          dmg_path="$(find "$bundle_dir/dmg" -maxdepth 1 -name '*.dmg' -print -quit)"
+
+          binary_arch="$(lipo -archs "$binary_path")"
+          if [[ "$binary_arch" != "x86_64" ]]; then
+            printf 'expected an x86_64 binary, got: %s\n' "$binary_arch" >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+          dmg_name="$(basename "$dmg_path")"
+          dmg_checksum="$(shasum -a 256 "$dmg_path" | awk '{ print $1 }')"
+          dmg_size="$(du -h "$dmg_path" | awk '{ print $1 }')"
+
+          echo "dmg_name=$dmg_name" >> "$GITHUB_OUTPUT"
+          echo "dmg_size=$dmg_size" >> "$GITHUB_OUTPUT"
+          echo "dmg_checksum=$dmg_checksum" >> "$GITHUB_OUTPUT"
+          echo "binary_arch=$binary_arch" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## macOS Intel build"
+            echo ""
+            echo "- Version: \`${{ steps.build_meta.outputs.version }}\`"
+            echo "- Ref: \`${{ steps.build_meta.outputs.ref_name }}\` (\`${GITHUB_SHA}\`)"
+            echo "- Target: \`${TARGET}\` (binary arch: \`${binary_arch}\`)"
+            echo "- DMG: \`${dmg_name}\` (${dmg_size})"
+            echo "- SHA-256: \`${dmg_checksum}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: skilldock-${{ steps.build_meta.outputs.version }}-x86_64-apple-darwin
+          path: src-tauri/target/${{ env.TARGET }}/release/bundle/**
+          if-no-files-found: error
+          retention-days: 14

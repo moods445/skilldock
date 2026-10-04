@@ -7,7 +7,7 @@
 // Every job also overwrites `latest.json`, so whichever job finishes last wins.
 // This script keeps the platform entries that are already published and fills in
 // the missing ones from the updater signatures uploaded next to the installers,
-// so macOS Apple Silicon, macOS Intel, and Windows x64 all stay updatable.
+// so every published architecture stays updatable.
 
 const fs = require("node:fs");
 const path = require("node:path");

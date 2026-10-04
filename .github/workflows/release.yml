@@ -1,5 +1,10 @@
 name: Release
 
+# Publishing pipeline for the public repository only. It needs the repository
+# secrets (Apple certificate, notarization credentials, updater private key) and it
+# reads and writes the wanghuan9/skilldock Release, so it is pinned to that
+# repository below. Forks only get the secret-free macos-intel-build.yml CI
+# packaging pipeline.
 on:
   release:
     types: [published]
@@ -21,6 +26,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.repository == 'wanghuan9/skilldock'
     permissions:
       contents: write
     env:
@@ -34,14 +40,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Public desktop support policy: macOS Apple Silicon, macOS Intel, and Windows x64.
+          # Public desktop support policy: macOS Apple Silicon and Windows x64 only.
           - platform: macos-latest
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-          # macos-latest is Apple Silicon, so Intel builds need an Intel runner.
-          - platform: macos-15-intel
-            target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin
+          # macOS Intel builds live in macos-intel-build.yml and are not published here.
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             args: >-
@@ -304,8 +307,9 @@ jobs:
 
   # tauri-action only knows about the target it built, and every matrix job
   # overwrites latest.json. Rebuild the manifest once every installer is uploaded
-  # so Apple Silicon, Intel, and Windows x64 installs all find their update.
+  # so Apple Silicon and Windows x64 installs both find their update.
   updater-metadata:
+    if: github.repository == 'wanghuan9/skilldock'
     needs: publish
     permissions:
       contents: write
