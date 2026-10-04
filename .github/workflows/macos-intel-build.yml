@@ -74,6 +74,8 @@ jobs:
 
           echo "version=$package_version" >> "$GITHUB_OUTPUT"
           echo "ref_name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          # Later steps read the version from the environment under set -u.
+          echo "VERSION=$package_version" >> "$GITHUB_ENV"
 
       - name: Build Intel app and DMG
         shell: bash
@@ -147,6 +149,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_DMG: ${{ steps.verify.outputs.dmg_name }}
+          DMG_CHECKSUM: ${{ steps.verify.outputs.dmg_checksum }}
         run: |
           set -euo pipefail
           notes_file="$RUNNER_TEMP/intel-release-notes.md"
@@ -154,14 +158,14 @@ jobs:
             echo "Ad-hoc signed Intel (x86_64) macOS build of SkillDock ${VERSION}."
             echo ""
             echo "- Commit: \`${GITHUB_SHA}\` (\`${GITHUB_REF_NAME}\`)"
-            echo "- Asset: \`${release_dmg_name}\`"
-            echo "- SHA-256: \`${dmg_checksum}\`"
+            echo "- Asset: \`${RELEASE_DMG}\`"
+            echo "- SHA-256: \`${DMG_CHECKSUM}\`"
             echo ""
             echo "This build is not notarized. macOS may refuse to open it; after"
             echo "installing, run \`sudo xattr -cr /Applications/SkillDock.app\`."
           } > "$notes_file"
 
-          assets=("$RUNNER_TEMP/intel-release/SkillDock_${VERSION}_intel.dmg" \
+          assets=("$RUNNER_TEMP/intel-release/${RELEASE_DMG}" \
                   "$RUNNER_TEMP/intel-release/SHA256SUMS")
 
           if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
