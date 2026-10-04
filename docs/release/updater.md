@@ -91,12 +91,20 @@ gh workflow run release.yml \
 
 ## macOS Intel 构建
 
-`.github/workflows/macos-intel-build.yml` 在每次 push 和手动触发时，于 `macos-15-intel` runner 上构建 `x86_64-apple-darwin` 的 `app` 与 `dmg`，并把 `bundle/` 作为 workflow artifact（保留 14 天）上传。该 action：
+`macos-intel-build.yml` 在每次 push 和手动触发时，于 `macos-15-intel` runner 上构建 `x86_64-apple-darwin` 的 `app` 与 `dmg`。该 action：
 
-- 不创建或修改任何 GitHub Release，因此不依赖 Apple 证书、公证账号和 updater 私钥；
+- 不依赖任何仓库 secrets，因此 fork 与 CI 环境都能运行；
 - 用 ad-hoc 签名（`signingIdentity: "-"`）覆盖 `tauri.conf.json` 中的 Developer ID，使产物可在 Intel Mac 上直接安装；
-- 关闭 updater artifacts，因为没有对应 Release；
-- 校验 `package.json`、`tauri.conf.json`、`Cargo.toml` 三处版本一致，并用 `lipo` 确认产物架构确为 `x86_64`。
+- 关闭 updater artifacts，因为不产出 `latest.json`；
+- 校验 `package.json`、`tauri.conf.json`、`Cargo.toml` 三处版本一致，并用 `lipo` 确认产物架构确为 `x86_64`；
+- 把 `bundle/` 同时作为 workflow artifact 上传（保留 14 天），名称为 `skilldock-<version>-intel`；
+- 用内置 `GITHUB_TOKEN` 把 dmg 推送到仓库内滚动更新的 **prerelease** `intel-ci`，资产名为 `SkillDock_<version>_intel.dmg` 与 `SHA256SUMS`。该 Release 始终是 prerelease，不会成为仓库的 latest release，因此不影响 updater 端点与正式版本下载。
+
+首次安装未公证的 Intel 版本后需要执行：
+
+```bash
+sudo xattr -cr /Applications/SkillDock.app
+```
 
 正式发布的 Intel 安装包仍需在 `release.yml` 的矩阵中增加 `macos-15-intel` / `x86_64-apple-darwin`，并复用同一套 Apple 签名、公证和 updater Secrets。
 
