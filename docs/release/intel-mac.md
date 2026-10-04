@@ -333,4 +333,26 @@ CI 里已内置的硬校验：
 - **README 平台表与实际渠道不符。** `README.md` / `README.zh-CN.md` 的下载表格里标着 `macOS Intel (x86_64) | Released`，但正式 Release 里目前没有 Intel 安装包，Intel 包只存在于 `intel-ci` 这个 prerelease。措辞需要与发布策略对齐。
 - **Intel 包是 ad-hoc 签名、未公证。** 用户必须执行 `sudo xattr -cr /Applications/SkillDock.app`。若要让 Intel 用户免这一步，需在 `wanghuan9/skilldock` 配齐 Apple 证书并把 Intel target 加回 `release.yml` 矩阵（同时把 5 处硬编码的 `wanghuan9/skilldock` 与 tauri-action 的 `owner/repo` 一起参数化，否则在 fork 上会往原仓库写 Release）。
 - **macOS 12 的 `color-mix()` 降级未修复**，方案见第 7 节。
-- **`macos-intel-build.yml` 在每次 push 都跑完整 Rust release 构建**（约 11 分钟）。若 CI 配额紧张，可在 `on.push` 下加 `paths-ignore` 跳过纯文档改动。
+
+---
+
+## 附：CI 成本控制
+
+`macos-intel-build.yml` 的一次完整 Rust release 构建约 11 分钟。纯文档提交不可能改变构建产物，因此触发条件加了过滤：
+
+```yaml
+on:
+  push:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+```
+
+效果：
+
+- 只改 `*.md` 或 `docs/**` 的 push 不触发构建
+- 改动 `.github/`、`src/`、`src-tauri/`、`package.json` 等仍会正常触发
+- `workflow_dispatch` 不受过滤影响，随时可手动跑一次完整验证
+
+注意 `paths-ignore` 会让**这些提交在 Actions 页面上完全不出现**（连跳过记录都没有），需要确认"某个提交有没有跑过 CI"时要用 `gh run list`，不要只看提交状态。

@@ -6,6 +6,11 @@ name: macOS Intel Build
 # bundle as a workflow artifact for quick manual testing.
 on:
   push:
+    # Pure documentation commits cannot change the build output, and a full
+    # Rust release build costs ~11 minutes of runner time.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   workflow_dispatch:
 
 concurrency:
