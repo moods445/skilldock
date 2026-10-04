@@ -34,10 +34,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Public desktop support policy: macOS Apple Silicon and Windows x64 only.
+          # Public desktop support policy: macOS Apple Silicon, macOS Intel, and Windows x64.
           - platform: macos-latest
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
+          # macos-latest is Apple Silicon, so Intel builds need an Intel runner.
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             args: >-
@@ -80,12 +84,14 @@ jobs:
               fi
               complete=false
               case "${{ matrix.target }}" in
-                aarch64-apple-darwin)
-                  if jq -e '
+                *-apple-darwin)
+                  target_arch="${{ matrix.target }}"
+                  target_arch="${target_arch%%-*}"
+                  if jq -e --arg arch "_${target_arch}" '
                     [.assets[].name] as $names
-                    | any($names[]; endswith("_aarch64.dmg"))
-                    and any($names[]; endswith("_aarch64.app.tar.gz"))
-                    and any($names[]; endswith("_aarch64.app.tar.gz.sig"))
+                    | any($names[]; endswith($arch + ".dmg"))
+                    and any($names[]; endswith($arch + ".app.tar.gz"))
+                    and any($names[]; endswith($arch + ".app.tar.gz.sig"))
                   ' "$release_json" >/dev/null; then
                     complete=true
                   fi
@@ -230,7 +236,7 @@ jobs:
           required=(
             TAURI_SIGNING_PRIVATE_KEY
           )
-          if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
+          if [[ "${{ matrix.target }}" == *-apple-darwin ]]; then
             required+=(
               APPLE_CERTIFICATE
               APPLE_CERTIFICATE_PASSWORD
@@ -258,13 +264,13 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         if: steps.public_release.outputs.complete != 'true'
         env:
-          APPLE_CERTIFICATE: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_ID: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_CERTIFICATE: ${{ contains(matrix.target, 'apple-darwin') && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ contains(matrix.target, 'apple-darwin') && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ contains(matrix.target, 'apple-darwin') && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ contains(matrix.target, 'apple-darwin') && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ contains(matrix.target, 'apple-darwin') && secrets.APPLE_TEAM_ID || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KEYCHAIN_PASSWORD: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.KEYCHAIN_PASSWORD || '' }}
+          KEYCHAIN_PASSWORD: ${{ contains(matrix.target, 'apple-darwin') && secrets.KEYCHAIN_PASSWORD || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -282,7 +288,7 @@ jobs:
       - name: Verify macOS signature and notarization
         if: >-
           steps.public_release.outputs.complete != 'true' &&
-          matrix.target == 'aarch64-apple-darwin'
+          contains(matrix.target, 'apple-darwin')
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
@@ -296,33 +302,73 @@ jobs:
           spctl --assess --type execute --verbose=4 "$app_path"
           xcrun stapler validate "$app_path"
 
-      - name: Preserve existing updater metadata
-        if: >-
-          steps.public_release.outputs.exists == 'true' &&
-          steps.public_release.outputs.complete != 'true'
+  # tauri-action only knows about the target it built, and every matrix job
+  # overwrites latest.json. Rebuild the manifest once every installer is uploaded
+  # so Apple Silicon, Intel, and Windows x64 installs all find their update.
+  updater-metadata:
+    needs: publish
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+      SOURCE_REF: ${{ inputs.source_ref || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ env.SOURCE_REF }}
+
+      - name: Collect published updater assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          existing_updater="$RUNNER_TEMP/existing-updater/latest.json"
-          if [[ ! -f "$existing_updater" ]]; then
-            echo "Existing release has no latest.json metadata to preserve."
-            exit 0
-          fi
-
-          updated_updater_dir="$RUNNER_TEMP/updated-updater"
-          merged_updater_dir="$RUNNER_TEMP/merged-updater"
-          mkdir -p "$updated_updater_dir" "$merged_updater_dir"
+          signature_dir="$RUNNER_TEMP/updater-signatures"
+          mkdir -p "$signature_dir"
           gh release download "$RELEASE_TAG" \
             --repo wanghuan9/skilldock \
+            --pattern '*.sig' \
+            --dir "$signature_dir"
+
+          latest_json="$RUNNER_TEMP/latest.json"
+          rm -f "$latest_json"
+          if ! gh release download "$RELEASE_TAG" \
+            --repo wanghuan9/skilldock \
             --pattern latest.json \
-            --dir "$updated_updater_dir"
-          jq -s '.[1] * .[0]' \
-            "$updated_updater_dir/latest.json" \
-            "$existing_updater" \
-            > "$merged_updater_dir/latest.json"
+            --dir "$RUNNER_TEMP"; then
+            echo "Release has no latest.json yet; building it from the uploaded signatures."
+          fi
+
+          gh release view "$RELEASE_TAG" \
+            --repo wanghuan9/skilldock \
+            --json body \
+            --jq .body > "$RUNNER_TEMP/release-body.md"
+
+      - name: Publish merged updater metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          if [[ "$RELEASE_TAG" != "v${version}" ]]; then
+            printf 'Release tag %s does not match package version v%s\n' "$RELEASE_TAG" "$version" >&2
+            exit 1
+          fi
+
+          merged_dir="$RUNNER_TEMP/merged-updater"
+          rm -rf "$merged_dir"
+          mkdir -p "$merged_dir"
+          node scripts/updater-metadata.cjs \
+            --tag "$RELEASE_TAG" \
+            --version "$version" \
+            --signature-dir "$RUNNER_TEMP/updater-signatures" \
+            --latest-json "$RUNNER_TEMP/latest.json" \
+            --notes "$RUNNER_TEMP/release-body.md" \
+            --output "$merged_dir/latest.json"
+
+          [[ -f "$merged_dir/latest.json" ]] || exit 0
           gh release upload "$RELEASE_TAG" \
-            "$merged_updater_dir/latest.json" \
+            "$merged_dir/latest.json" \
             --repo wanghuan9/skilldock \
             --clobber

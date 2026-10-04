@@ -47,7 +47,7 @@ npm run release:publish
 4. 根据公开 Git 历史生成发布日志，并等待人工确认。
 5. 创建草稿 Release，上传 macOS 安装包、updater artifacts、签名和 `latest.json`。
 6. 所有本地资产上传完成后发布 Release，并让版本 tag 精确指向本次构建的公开提交。
-7. Release 发布事件触发公开仓库的 `release.yml`，自动补齐 Windows x64 安装包并合并 `latest.json`。
+7. Release 发布事件触发公开仓库的 `release.yml`，自动补齐 macOS Intel 与 Windows x64 安装包，并重建包含全部平台的 `latest.json`。
 
 默认 updater 私钥路径：
 
@@ -79,6 +79,16 @@ gh workflow run release.yml \
 `source_ref` 可以是公开分支、tag 或 commit。工作流会解析其精确提交，检查版本号与 `release_tag` 一致，并让 Release tag 指向该提交。
 
 如果 Release 已存在，工作流只构建缺失的平台资产；已有平台不会重复构建。补传时会保留现有 Release 正文和 `latest.json` 中的历史发布说明。
+
+`release.yml` 的构建矩阵包含三个 target：
+
+- `aarch64-apple-darwin`（`macos-latest`，Apple Silicon）
+- `x86_64-apple-darwin`（`macos-15-intel`，Intel）
+- `x86_64-pc-windows-msvc`（`windows-latest`）
+
+每个 target 在独立 job 中构建，`tauri-action` 只能写入自己构建的平台，因此 `release.yml` 在所有构建 job 之后运行 `updater-metadata` job：它下载 Release 上全部 `.sig` 资产，用 `scripts/updater-metadata.cjs` 保留已有平台条目、补齐缺失平台，并覆盖上传最终的 `latest.json`。缺少这一步时，最后完成的构建 job 会覆盖其他平台的条目，导致部分架构无法自动更新。
+
+macOS Intel 与 Apple Silicon 共用同一套 Apple 证书、公证账号和 updater 私钥，Secrets 无需额外配置。
 
 ## GitHub Actions Secrets
 

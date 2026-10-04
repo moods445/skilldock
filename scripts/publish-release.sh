@@ -17,7 +17,8 @@ RELEASE_REVIEW_FORCE_BYPASS="${SKILLDOCK_RELEASE_NOTES_FORCE_BYPASS:-}"
 APPLE_NOTARIZATION_KEYCHAIN_SERVICE="com.skilldock.notarization"
 DEFAULT_APPLE_TEAM_ID="7BMASR586D"
 EXPECTED_MACOS_SIGNING_IDENTITY="Developer ID Application: huan wang (7BMASR586D)"
-# Public macOS releases support Apple Silicon only. Windows x64 is built by GitHub Actions.
+# This machine builds Apple Silicon only. macOS Intel (x86_64) and Windows x64 are
+# built by GitHub Actions, which also rewrites latest.json with every platform.
 MACOS_TARGETS=("aarch64-apple-darwin:aarch64")
 
 die() {

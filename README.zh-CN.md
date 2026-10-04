@@ -174,6 +174,7 @@ SkillDock 适合作为企业统一的 Skill 管理平台，对接公司内部商
 | 平台 | 状态 |
 | --- | --- |
 | macOS Apple Silicon | 已发布 |
+| macOS Intel (x86_64) | 已发布 |
 | Windows x64 | 已发布 |
 
 ### 未公证应用放行

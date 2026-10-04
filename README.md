@@ -173,6 +173,7 @@ Download the latest [SkillDock release](https://github.com/wanghuan9/skilldock/r
 | Platform | Status |
 | --- | --- |
 | macOS Apple Silicon | Released |
+| macOS Intel (x86_64) | Released |
 | Windows x64 | Released |
 
 ### Open the Unnotarized App
